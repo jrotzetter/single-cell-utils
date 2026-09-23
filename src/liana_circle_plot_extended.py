@@ -61,8 +61,8 @@ def circle_plot_extended(
     node_label_size: int = 8,
     node_label_alpha: float = 0.7,
     add_node_label: bool = True,
-    cluster_nodes: bool = True,  # NEW: Enable/disable sorting by colorby
-    alternate_labels: bool = True,  # NEW: Enable/disable alternating offset
+    cluster_nodes: bool = True,
+    alternate_labels: Literal["selective", True, False] = True,
 ) -> Axes:
     """
     Visualize the cell-cell communication network using a circular plot.
@@ -330,7 +330,9 @@ def circle_plot_extended(
             offset_mag = 0.15  # Default fallback if offset is (0,0)
 
         # Select offset function based on parameter
-        if alternate_labels:
+        if alternate_labels == "selective":
+            label_pos = get_selective_radial_offset(pos, base_offset=offset_mag)
+        elif alternate_labels:
             # Calculate alternating inward/outward radial offset
             label_pos = get_alternating_radial_offset(pos, base_offset=offset_mag)
         else:
@@ -343,7 +345,7 @@ def circle_plot_extended(
             G, label_pos, font_size=node_label_size, bbox=label_options, ax=ax
         )
 
-        # Draw Connectors (some go inward, some outward)
+        # Draw Connectors
         for node in G.nodes():
             node_pos = pos[node]
             label_xy = label_pos[node]
@@ -442,4 +444,66 @@ def get_alternating_radial_offset(positions, base_offset=0.15):
                 y + direction * magnitude * np.sin(angle),
             ]
         )
+    return label_positions
+
+
+def get_selective_radial_offset(positions, base_offset=0.15, stagger_angle_range=45.0):
+    """
+    Apply alternating inward/outward offsets only to nodes at the top and bottom.
+    Nodes on the left and right sides are pushed strictly outward.
+
+    Parameters
+    ----------
+    positions : dict
+        Node positions {node: [x, y]}.
+    base_offset : float
+        Base magnitude of the offset.
+    stagger_angle_range : float
+        Degrees from the vertical axis (90 and 270) within which to apply staggering.
+        Default 45.0 means staggering occurs between 45-135° (top) and 225-315° (bottom).
+    """
+    label_positions = {}
+
+    # Sort nodes by angle to ensure consistent alternating pattern within the staggered zones
+    sorted_nodes = sorted(
+        positions.keys(), key=lambda n: np.arctan2(positions[n][1], positions[n][0])
+    )
+
+    # Counter for alternating logic (only increments when hit a staggered node)
+    stagger_index = 0
+
+    for node in sorted_nodes:
+        x, y = positions[node]
+        # Calculate angle in degrees [0, 360)
+        angle_rad = np.arctan2(y, x)
+        angle_deg = np.degrees(angle_rad) % 360
+
+        # Determine if node is in Top or Bottom zone
+        # Top: 90 +/- range, Bottom: 270 +/- range
+        in_top_zone = (
+            (90 - stagger_angle_range) <= angle_deg <= (90 + stagger_angle_range)
+        )
+        in_bottom_zone = (
+            (270 - stagger_angle_range) <= angle_deg <= (270 + stagger_angle_range)
+        )
+
+        is_staggered_zone = in_top_zone or in_bottom_zone
+
+        if is_staggered_zone:
+            # Apply alternating logic
+            direction = 1 if stagger_index % 2 == 0 else -1
+            magnitude = base_offset * (1.2 if direction > 0 else 1.0)
+            stagger_index += 1  # Only increment counter for staggered nodes
+        else:
+            # Force outward for side labels (Left/Right)
+            direction = 1
+            magnitude = base_offset
+
+        label_positions[node] = np.array(
+            [
+                x + direction * magnitude * np.cos(angle_rad),
+                y + direction * magnitude * np.sin(angle_rad),
+            ]
+        )
+
     return label_positions
