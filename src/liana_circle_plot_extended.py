@@ -60,9 +60,10 @@ def circle_plot_extended(
     node_label_offset: tuple[float, float] = (0.1, -0.2),
     node_label_size: int = 8,
     node_label_alpha: float = 0.7,
-    add_node_label: bool = True,
     cluster_nodes: bool = True,
-    alternate_labels: Literal["selective", True, False] = True,
+    label_placement: Literal[
+        "manual", "hybrid", "alternating", "outward", None
+    ] = "manual",
 ) -> Axes:
     """
     Visualize the cell-cell communication network using a circular plot.
@@ -120,16 +121,19 @@ def circle_plot_extended(
         The size of the node label, by default 8.
     node_label_alpha
         The transparency of the node label, by default .7.
-    add_node_label
-        Whether to display the node_labels on the plot.
     cluster_nodes
         Whether to sort nodes by `colorby` categories to group them visually.
         By default True. If False, nodes are plotted in the default graph order.
         Only has an effect if `colorby` is provided.
-    alternate_labels
-        Whether to alternate label positions inward and outward radially.
-        By default True. If False, all labels are placed radially outward.
-        Only has an effect if `add_node_label` is True.
+    label_placement
+        Strategy for positioning node labels. Options:
+        - 'manual': (Default) Uses the `node_label_offset` tuple directly.
+          Preserves original Liana behavior.
+        - 'hybrid': Alternates inward/outward only for top/bottom nodes;
+          forces outward for side nodes.
+        - 'alternating': Strictly alternates inward/outward for all nodes.
+        - 'outward': Pushes all labels radially outward.
+        - None: Disables node label and connector drawing entirely.
 
     Returns
     -------
@@ -143,6 +147,13 @@ def circle_plot_extended(
     """
     if groupby is None:
         raise ValueError("`groupby` must be provided!")
+
+    valid_modes = {"manual", "hybrid", "alternating", "outward", None}
+    if label_placement not in valid_modes:
+        raise ValueError(
+            f"Invalid label_placement='{label_placement}'. "
+            f"Must be one of: {sorted(valid_modes)}"
+        )
 
     # Check if any category of 'groupby' maps to multiple categories of 'colorby' (which would cause ambiguity)
     if colorby is not None:
@@ -323,21 +334,24 @@ def circle_plot_extended(
     nx.draw_networkx_nodes(
         G, pos, node_color=node_color, node_size=node_size, alpha=node_alpha, ax=ax
     )
-    if add_node_label:
+    if label_placement is not None:
         # Generate the radial label positions
         offset_mag = np.sqrt(node_label_offset[0] ** 2 + node_label_offset[1] ** 2)
         if offset_mag == 0:
             offset_mag = 0.15  # Default fallback if offset is (0,0)
 
         # Select offset function based on parameter
-        if alternate_labels == "selective":
+        if label_placement == "hybrid":
             label_pos = get_selective_radial_offset(pos, base_offset=offset_mag)
-        elif alternate_labels:
+        elif label_placement == "alternating":
             # Calculate alternating inward/outward radial offset
             label_pos = get_alternating_radial_offset(pos, base_offset=offset_mag)
-        else:
+        elif label_placement == "outward":
             # Use simple outward offset for all nodes
             label_pos = get_radial_offset(pos, offset_magnitude=offset_mag)
+        else:  # 'manual'
+            # Use base Liana circle_plot positions
+            label_pos = {k: v + np.array(node_label_offset) for k, v in pos.items()}
 
         # Draw Labels at the calculated radial positions
         label_options = {"ec": "k", "fc": "white", "alpha": node_label_alpha}
@@ -410,7 +424,9 @@ def circle_plot_extended(
     return ax
 
 
-def get_radial_offset(positions, offset_magnitude=0.15):
+def get_radial_offset(
+    positions: dict[str, np.ndarray], offset_magnitude: float = 0.15
+) -> dict[str, np.ndarray]:
     label_positions = {}
     for node, (x, y) in positions.items():
         # Calculate angle of the node from the center (0,0)
@@ -422,7 +438,9 @@ def get_radial_offset(positions, offset_magnitude=0.15):
     return label_positions
 
 
-def get_alternating_radial_offset(positions, base_offset=0.15):
+def get_alternating_radial_offset(
+    positions, base_offset: float = 0.15
+) -> dict[str, np.ndarray]:
     label_positions = {}
     # Sort nodes by angle to ensure consistent alternating pattern around the circle
     sorted_nodes = sorted(
@@ -447,7 +465,9 @@ def get_alternating_radial_offset(positions, base_offset=0.15):
     return label_positions
 
 
-def get_selective_radial_offset(positions, base_offset=0.15, stagger_angle_range=45.0):
+def get_selective_radial_offset(
+    positions, base_offset: float = 0.15, stagger_angle_range: float = 45.0
+) -> dict[str, np.ndarray]:
     """
     Apply alternating inward/outward offsets only to nodes at the top and bottom.
     Nodes on the left and right sides are pushed strictly outward.
