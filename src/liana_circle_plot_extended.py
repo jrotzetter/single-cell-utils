@@ -315,21 +315,12 @@ def circle_plot_extended(
     )
     if add_node_label:
         # Generate the radial label positions
-        # Uses the user-defined scale from node_label_offset as magnitude
         offset_mag = np.sqrt(node_label_offset[0] ** 2 + node_label_offset[1] ** 2)
         if offset_mag == 0:
             offset_mag = 0.15  # Default fallback if offset is (0,0)
 
-        label_pos = get_radial_offset(pos, offset_magnitude=offset_mag)
-
-        # label_options = {"ec": "k", "fc": "white", "alpha": node_label_alpha}
-        # _ = nx.draw_networkx_labels(
-        #     G,
-        #     {k: v + np.array(node_label_offset) for k, v in pos.items()},
-        #     font_size=node_label_size,
-        #     bbox=label_options,
-        #     ax=ax
-        #     )
+        # Calculate alternating inward/outward radial offset
+        label_pos = get_alternating_radial_offset(pos, base_offset=offset_mag)
 
         # Draw Labels at the calculated radial positions
         label_options = {"ec": "k", "fc": "white", "alpha": node_label_alpha}
@@ -337,46 +328,19 @@ def circle_plot_extended(
             G, label_pos, font_size=node_label_size, bbox=label_options, ax=ax
         )
 
-        # Draw connector lines between nodes and labels
-        # if colorby is not None or node_label_offset != (0, 0):
-        #     for node in G.nodes():
-        #         node_pos = pos[node]
-        #         # Label position (same offset used in draw_networkx_labels)
-        #         label_pos = node_pos + np.array(node_label_offset)
-
-        #         # To draw connector lines with node-matching colors
-        #         # node_color_val = groupby_colors[node]
-
-        #         # Draw a faint line connecting them
-        #         ax.plot(
-        #             [node_pos[0], label_pos[0]],
-        #             [node_pos[1], label_pos[1]],
-        #             color='gray',
-        #             # color=node_color_val, # Uncomment to draw connector lines with node-matching colors
-        #             alpha=0.8,
-        #             linewidth=0.8,
-        #             linestyle='--',
-        #             zorder=0  # Behind nodes and labels
-        #         )
-
-        # Draw connector lines between nodes and labels
+        # Draw Connectors (some go inward, some outward)
         for node in G.nodes():
             node_pos = pos[node]
             label_xy = label_pos[node]
 
-            # To draw connector lines with node-matching colors
-            # node_color_val = groupby_colors[node]
-
-            # Draw a faint line connecting them
             ax.plot(
                 [node_pos[0], label_xy[0]],
                 [node_pos[1], label_xy[1]],
                 color="gray",
-                # color=node_color_val, # Uncomment to draw connector lines with node-matching colors
                 alpha=0.8,
                 linewidth=0.8,
                 linestyle="--",
-                zorder=0,  # Behind nodes and labels
+                zorder=0,
             )
 
     ax.set_frame_on(False)
@@ -437,5 +401,30 @@ def get_radial_offset(positions, offset_magnitude=0.15):
         # Calculate new position pushed outward along that angle
         label_positions[node] = np.array(
             [x + offset_magnitude * np.cos(angle), y + offset_magnitude * np.sin(angle)]
+        )
+    return label_positions
+
+
+def get_alternating_radial_offset(positions, base_offset=0.15):
+    label_positions = {}
+    # Sort nodes by angle to ensure consistent alternating pattern around the circle
+    sorted_nodes = sorted(
+        positions.keys(), key=lambda n: np.arctan2(positions[n][1], positions[n][0])
+    )
+
+    for i, node in enumerate(sorted_nodes):
+        x, y = positions[node]
+        angle = np.arctan2(y, x)
+
+        # Alternate direction: even indices OUTWARD (+), odd indices INWARD (-)
+        # Multiply by 1.2 for outward nodes to give them slightly more breathing room
+        direction = 1 if i % 2 == 0 else -1
+        magnitude = base_offset * (1.2 if direction > 0 else 1.0)
+
+        label_positions[node] = np.array(
+            [
+                x + direction * magnitude * np.cos(angle),
+                y + direction * magnitude * np.sin(angle),
+            ]
         )
     return label_positions
