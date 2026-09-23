@@ -61,6 +61,8 @@ def circle_plot_extended(
     node_label_size: int = 8,
     node_label_alpha: float = 0.7,
     add_node_label: bool = True,
+    cluster_nodes: bool = True,  # NEW: Enable/disable sorting by colorby
+    alternate_labels: bool = True,  # NEW: Enable/disable alternating offset
 ) -> Axes:
     """
     Visualize the cell-cell communication network using a circular plot.
@@ -120,6 +122,14 @@ def circle_plot_extended(
         The transparency of the node label, by default .7.
     add_node_label
         Whether to display the node_labels on the plot.
+    cluster_nodes
+        Whether to sort nodes by `colorby` categories to group them visually.
+        By default True. If False, nodes are plotted in the default graph order.
+        Only has an effect if `colorby` is provided.
+    alternate_labels
+        Whether to alternate label positions inward and outward radially.
+        By default True. If False, all labels are placed radially outward.
+        Only has an effect if `add_node_label` is True.
 
     Returns
     -------
@@ -225,8 +235,8 @@ def circle_plot_extended(
     # Determine Node Order
     sorted_nodes = list(G.nodes())
 
-    # If colorby is provided, sort nodes by category to group them
-    if colorby is not None:
+    # Only sort nodes by category to group them if cluster_nodes is True AND colorby is provided
+    if cluster_nodes and colorby is not None:
         node_to_colorby = adata.obs.groupby(groupby, observed=False)[colorby].first()
         sorted_nodes = sorted(
             G.nodes(), key=lambda node: (node_to_colorby.get(node, ""), node)
@@ -319,8 +329,13 @@ def circle_plot_extended(
         if offset_mag == 0:
             offset_mag = 0.15  # Default fallback if offset is (0,0)
 
-        # Calculate alternating inward/outward radial offset
-        label_pos = get_alternating_radial_offset(pos, base_offset=offset_mag)
+        # Select offset function based on parameter
+        if alternate_labels:
+            # Calculate alternating inward/outward radial offset
+            label_pos = get_alternating_radial_offset(pos, base_offset=offset_mag)
+        else:
+            # Use simple outward offset for all nodes
+            label_pos = get_radial_offset(pos, offset_magnitude=offset_mag)
 
         # Draw Labels at the calculated radial positions
         label_options = {"ec": "k", "fc": "white", "alpha": node_label_alpha}
