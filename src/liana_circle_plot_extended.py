@@ -253,12 +253,21 @@ def circle_plot_extended(
     # Rotate all positions by 90 degrees (pi/2) to move index 0 to the TOP
     rotation_angle = np.pi / 2  # 90 degrees counter-clockwise
 
-    for node in pos:
-        x, y = pos[node]
-        # Apply rotation matrix
-        new_x = x * np.cos(rotation_angle) - y * np.sin(rotation_angle)
-        new_y = x * np.sin(rotation_angle) + y * np.cos(rotation_angle)
-        pos[node] = np.array([new_x, new_y])
+    # for node in pos:
+    #     x, y = pos[node]
+    #     # Apply rotation matrix
+    #     new_x = x * np.cos(rotation_angle) - y * np.sin(rotation_angle)
+    #     new_y = x * np.sin(rotation_angle) + y * np.cos(rotation_angle)
+    #     pos[node] = np.array([new_x, new_y])
+
+    # Vectorized rotation matrix using NumPy broadcasting
+    rotation_matrix = np.array(
+        [
+            [np.cos(rotation_angle), -np.sin(rotation_angle)],
+            [np.sin(rotation_angle), np.cos(rotation_angle)],
+        ]
+    )
+    pos = {node: rotation_matrix @ coord for node, coord in pos.items()}
 
     ### --- Colorby Grouping End --- ###
 
@@ -305,48 +314,93 @@ def circle_plot_extended(
         G, pos, node_color=node_color, node_size=node_size, alpha=node_alpha, ax=ax
     )
     if add_node_label:
+        # Generate the radial label positions
+        # Uses the user-defined scale from node_label_offset as magnitude
+        offset_mag = np.sqrt(node_label_offset[0] ** 2 + node_label_offset[1] ** 2)
+        if offset_mag == 0:
+            offset_mag = 0.15  # Default fallback if offset is (0,0)
+
+        label_pos = get_radial_offset(pos, offset_magnitude=offset_mag)
+
+        # label_options = {"ec": "k", "fc": "white", "alpha": node_label_alpha}
+        # _ = nx.draw_networkx_labels(
+        #     G,
+        #     {k: v + np.array(node_label_offset) for k, v in pos.items()},
+        #     font_size=node_label_size,
+        #     bbox=label_options,
+        #     ax=ax
+        #     )
+
+        # Draw Labels at the calculated radial positions
         label_options = {"ec": "k", "fc": "white", "alpha": node_label_alpha}
         _ = nx.draw_networkx_labels(
-            G,
-            {k: v + np.array(node_label_offset) for k, v in pos.items()},
-            font_size=node_label_size,
-            bbox=label_options,
-            ax=ax,
+            G, label_pos, font_size=node_label_size, bbox=label_options, ax=ax
         )
 
         # Draw connector lines between nodes and labels
-        if colorby is not None or node_label_offset != (0, 0):
-            for node in G.nodes():
-                node_pos = pos[node]
-                # Label position (same offset used in draw_networkx_labels)
-                label_pos = node_pos + np.array(node_label_offset)
+        # if colorby is not None or node_label_offset != (0, 0):
+        #     for node in G.nodes():
+        #         node_pos = pos[node]
+        #         # Label position (same offset used in draw_networkx_labels)
+        #         label_pos = node_pos + np.array(node_label_offset)
 
-                # To draw connector lines with node-matching colors
-                # node_color_val = groupby_colors[node]
+        #         # To draw connector lines with node-matching colors
+        #         # node_color_val = groupby_colors[node]
 
-                # Draw a faint line connecting them
-                ax.plot(
-                    [node_pos[0], label_pos[0]],
-                    [node_pos[1], label_pos[1]],
-                    color="gray",
-                    # color=node_color_val, # Uncomment to draw connector lines with node-matching colors
-                    alpha=0.8,
-                    linewidth=0.8,
-                    linestyle="--",
-                    zorder=0,  # Behind nodes and labels
-                )
+        #         # Draw a faint line connecting them
+        #         ax.plot(
+        #             [node_pos[0], label_pos[0]],
+        #             [node_pos[1], label_pos[1]],
+        #             color='gray',
+        #             # color=node_color_val, # Uncomment to draw connector lines with node-matching colors
+        #             alpha=0.8,
+        #             linewidth=0.8,
+        #             linestyle='--',
+        #             zorder=0  # Behind nodes and labels
+        #         )
+
+        # Draw connector lines between nodes and labels
+        for node in G.nodes():
+            node_pos = pos[node]
+            label_xy = label_pos[node]
+
+            # To draw connector lines with node-matching colors
+            # node_color_val = groupby_colors[node]
+
+            # Draw a faint line connecting them
+            ax.plot(
+                [node_pos[0], label_xy[0]],
+                [node_pos[1], label_xy[1]],
+                color="gray",
+                # color=node_color_val, # Uncomment to draw connector lines with node-matching colors
+                alpha=0.8,
+                linewidth=0.8,
+                linestyle="--",
+                zorder=0,  # Behind nodes and labels
+            )
 
     ax.set_frame_on(False)
     xlim = ax.get_xlim()
     ylim = ax.get_ylim()
     coeff = 1.2
     ax.set_xlim((xlim[0] * coeff, xlim[1] * coeff))
-    ax.set_ylim((ylim[0] * coeff, ylim[1]))
+    ax.set_ylim((ylim[0] * coeff, ylim[1] * coeff))
     ax.set_aspect("equal")
 
     # Add legend for colorby categories only
     if colorby is not None:
-        # Create legend handles for each unique colorby category
+        # # Create legend handles for each unique colorby category
+        # legend_handles = [
+        #     Line2D([0], [0], marker='o', color='w',
+        #            markerfacecolor=color, label=category,
+        #            markersize=10, linestyle='None')
+        #     for category, color in colorby_colors.items()
+        # ]
+
+        # Only show categories that appear in the plot
+        present_colors = {
+            node_color_map[node] for node in G.nodes() if node in node_color_map
+        }
         legend_handles = [
             Line2D(
                 [0],
@@ -359,6 +413,7 @@ def circle_plot_extended(
                 linestyle="None",
             )
             for category, color in colorby_colors.items()
+            if color in present_colors
         ]
 
         ax.legend(
@@ -372,3 +427,15 @@ def circle_plot_extended(
         )
 
     return ax
+
+
+def get_radial_offset(positions, offset_magnitude=0.15):
+    label_positions = {}
+    for node, (x, y) in positions.items():
+        # Calculate angle of the node from the center (0,0)
+        angle = np.arctan2(y, x)
+        # Calculate new position pushed outward along that angle
+        label_positions[node] = np.array(
+            [x + offset_magnitude * np.cos(angle), y + offset_magnitude * np.sin(angle)]
+        )
+    return label_positions
