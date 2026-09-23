@@ -60,6 +60,7 @@ def circle_plot_extended(
     node_label_offset: tuple[float, float] = (0.1, -0.2),
     node_label_size: int = 8,
     node_label_alpha: float = 0.7,
+    add_node_label: bool = True,
 ) -> Axes:
     """
     Visualize the cell-cell communication network using a circular plot.
@@ -117,6 +118,8 @@ def circle_plot_extended(
         The size of the node label, by default 8.
     node_label_alpha
         The transparency of the node label, by default .7.
+    add_node_label
+        Whether to display the node_labels on the plot.
 
     Returns
     -------
@@ -217,7 +220,47 @@ def circle_plot_extended(
     )
 
     G = nx.convert_matrix.from_pandas_adjacency(_pivot_table, create_using=nx.DiGraph())
+
+    ### --- Colorby Grouping --- ###
+    # Determine Node Order
+    sorted_nodes = list(G.nodes())
+
+    # If colorby is provided, sort nodes by category to group them
+    if colorby is not None:
+        node_to_colorby = adata.obs.groupby(groupby, observed=False)[colorby].first()
+        sorted_nodes = sorted(
+            G.nodes(), key=lambda node: (node_to_colorby.get(node, ""), node)
+        )
+
+    # Rotate list so the first target node is at index 0
+    # (This ensures it lands at 3 o'clock initially, which will then be rotated to 12 o'clock)
+    if target_labels is not None:
+        targets = [target_labels] if isinstance(target_labels, str) else target_labels
+        for i, node in enumerate(sorted_nodes):
+            if node in targets:
+                sorted_nodes = sorted_nodes[i:] + sorted_nodes[:i]
+                break
+
+    # Rebuild graph with the determined order
+    G_ordered = nx.DiGraph()
+    G_ordered.add_nodes_from(sorted_nodes)
+    G_ordered.add_edges_from(G.edges(data=True))
+    G = G_ordered
+
+    # Generate circular layout (starts at 3 o'clock / 0 radians)
     pos = nx.circular_layout(G)
+
+    # Rotate all positions by 90 degrees (pi/2) to move index 0 to the TOP
+    rotation_angle = np.pi / 2  # 90 degrees counter-clockwise
+
+    for node in pos:
+        x, y = pos[node]
+        # Apply rotation matrix
+        new_x = x * np.cos(rotation_angle) - y * np.sin(rotation_angle)
+        new_y = x * np.sin(rotation_angle) + y * np.cos(rotation_angle)
+        pos[node] = np.array([new_x, new_y])
+
+    ### --- Colorby Grouping End --- ###
 
     # Assign Colors
     if colorby is not None:
@@ -227,7 +270,7 @@ def circle_plot_extended(
         # Original behavior
         groupby_colors = colorby_colors
 
-    # Extract edge/node properties (Unchanged to base circle_plot)
+    # Extract edge/node properties
     edge_color = [groupby_colors[cell[0]] for cell in G.edges]
     edge_width = np.asarray([G.edges[e]["weight"] for e in G.edges()])
     edge_width = _scale_list(
@@ -235,14 +278,17 @@ def circle_plot_extended(
     )
 
     node_color = [groupby_colors[cell] for cell in G.nodes]
-    node_size = pivot_table.sum(axis=1).values
+    # Calculate sizes aligned to the sorted node order
+    node_size = [
+        pivot_table.loc[node, :].sum() if node in pivot_table.index else 0
+        for node in G.nodes()
+    ]
     node_size = _scale_list(
         node_size, max_val=node_size_scale[1], min_val=node_size_scale[0]
     )
-
     fig, ax = plt.subplots(figsize=figure_size)
 
-    # Visualize network (Unchanged to base circle_plot)
+    # Visualize network (Unchanged)
     nx.draw_networkx_edges(
         G,
         pos,
@@ -258,36 +304,37 @@ def circle_plot_extended(
     nx.draw_networkx_nodes(
         G, pos, node_color=node_color, node_size=node_size, alpha=node_alpha, ax=ax
     )
-    label_options = {"ec": "k", "fc": "white", "alpha": node_label_alpha}
-    _ = nx.draw_networkx_labels(
-        G,
-        {k: v + np.array(node_label_offset) for k, v in pos.items()},
-        font_size=node_label_size,
-        bbox=label_options,
-        ax=ax,
-    )
+    if add_node_label:
+        label_options = {"ec": "k", "fc": "white", "alpha": node_label_alpha}
+        _ = nx.draw_networkx_labels(
+            G,
+            {k: v + np.array(node_label_offset) for k, v in pos.items()},
+            font_size=node_label_size,
+            bbox=label_options,
+            ax=ax,
+        )
 
-    # Draw connector lines between nodes and labels
-    if colorby is not None or node_label_offset != (0, 0):
-        for node in G.nodes():
-            node_pos = pos[node]
-            # Label position (same offset used in draw_networkx_labels)
-            label_pos = node_pos + np.array(node_label_offset)
+        # Draw connector lines between nodes and labels
+        if colorby is not None or node_label_offset != (0, 0):
+            for node in G.nodes():
+                node_pos = pos[node]
+                # Label position (same offset used in draw_networkx_labels)
+                label_pos = node_pos + np.array(node_label_offset)
 
-            # To draw connector lines with node-matching colors
-            # node_color_val = groupby_colors[node]
+                # To draw connector lines with node-matching colors
+                # node_color_val = groupby_colors[node]
 
-            # Draw a faint line connecting them
-            ax.plot(
-                [node_pos[0], label_pos[0]],
-                [node_pos[1], label_pos[1]],
-                color="gray",
-                # color=node_color_val, # Uncomment to draw connector lines with node-matching colors
-                alpha=0.8,
-                linewidth=0.8,
-                linestyle="--",
-                zorder=0,  # Behind nodes and labels
-            )
+                # Draw a faint line connecting them
+                ax.plot(
+                    [node_pos[0], label_pos[0]],
+                    [node_pos[1], label_pos[1]],
+                    color="gray",
+                    # color=node_color_val, # Uncomment to draw connector lines with node-matching colors
+                    alpha=0.8,
+                    linewidth=0.8,
+                    linestyle="--",
+                    zorder=0,  # Behind nodes and labels
+                )
 
     ax.set_frame_on(False)
     xlim = ax.get_xlim()
